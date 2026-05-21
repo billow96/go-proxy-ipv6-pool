@@ -1,0 +1,18 @@
+cidr: "2001:399:8205:ae00::/64"
+state_file: "state.json"
+verbose: false
+
+auth:
+  username: "proxy_user"
+  password: "proxy_password"
+
+dynamic:
+  http_port: 51122
+  socks5_port: 51123
+
+fixed:
+  http_ports:
+    - 52133
+    - 52134
+  socks5_ports:
+    - 52135

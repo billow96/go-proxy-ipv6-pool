@@ -1,88 +1,173 @@
 package main
 
 import (
-	"crypto/rand"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 )
 
-var cidr string
-var port int
-
 func main() {
+	var configPath string
+	var legacyCIDR string
+	var legacyPort int
 
-	flag.IntVar(&port, "port", 52122, "server port")
-	flag.StringVar(&cidr, "cidr", "", "ipv6 cidr")
+	flag.StringVar(&configPath, "config", "config.yaml", "config file path")
+	flag.StringVar(&legacyCIDR, "cidr", "", "ipv6 cidr, kept for compatibility when config file is absent")
+	flag.IntVar(&legacyPort, "port", 52122, "dynamic http port, kept for compatibility when config file is absent")
 	flag.Parse()
 
-	if cidr == "" {
-		log.Fatal("cidr is empty")
+	explicitConfig := false
+	explicitCIDR := false
+	explicitPort := false
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "config":
+			explicitConfig = true
+		case "cidr":
+			explicitCIDR = true
+		case "port":
+			explicitPort = true
+		}
+	})
+
+	cfg, err := loadRuntimeConfig(configPath, explicitConfig, legacyCIDR, legacyPort, explicitCIDR, explicitPort)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	httpPort := port
-	socks5Port := port + 1
+	if err := cfg.Validate(); err != nil {
+		log.Fatal(err)
+	}
 
-	if socks5Port > 65535 {
-		log.Fatal("port too large")
+	fixedPorts := cfg.Fixed.AllPorts()
+	state := &State{FixedPorts: make(map[string]string)}
+	if len(fixedPorts) > 0 {
+		state, err = LoadState(cfg.StateFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := state.EnsureFixedPortIPs(fixedPorts, cfg.CIDR); err != nil {
+			log.Fatal(err)
+		}
+		if err := state.Save(cfg.StateFile); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	auth, err := NewProxyAuth(cfg.Auth)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	startHTTPServer(&wg, cfg.Dynamic.HTTPPort, newRandomOutboundSelector(cfg.CIDR), auth, cfg.Verbose, "dynamic-http")
+	startSocks5Server(&wg, cfg.Dynamic.Socks5Port, newRandomOutboundSelector(cfg.CIDR), auth, "dynamic-socks5")
 
-	go func() {
-		err := socks5Server.ListenAndServe("tcp", fmt.Sprintf("0.0.0.0:%d", socks5Port))
-		if err != nil {
-			log.Fatal("socks5 Server err:",err)
-		}
-
-	}()
-	go func() {
-		err := http.ListenAndServe(fmt.Sprintf("0.0.0.0:%d", httpPort), httpProxy)
-		if err != nil {
-			log.Fatal("http Server err",err)
-		}
-	}()
-
+	for _, port := range cfg.Fixed.HTTPPorts {
+		ip := state.FixedPorts[fmt.Sprint(port)]
+		startHTTPServer(&wg, port, newFixedOutboundSelector(ip), auth, cfg.Verbose, fmt.Sprintf("fixed-http-%d", port))
+	}
+	for _, port := range cfg.Fixed.Socks5Ports {
+		ip := state.FixedPorts[fmt.Sprint(port)]
+		startSocks5Server(&wg, port, newFixedOutboundSelector(ip), auth, fmt.Sprintf("fixed-socks5-%d", port))
+	}
 
 	log.Println("server running ...")
-	log.Printf("http running on 0.0.0.0:%d", httpPort)
-	log.Printf("socks5 running on 0.0.0.0:%d", socks5Port)
-	log.Printf("ipv6 cidr:[%s]", cidr)
-	wg.Wait()
+	log.Printf("config: %s", cfg.ConfigSource)
+	log.Printf("state: %s", cfg.StateFile)
+	log.Printf("ipv6 cidr: [%s]", cfg.CIDR)
+	log.Printf("auth enabled: %v", auth.Enabled())
+	log.Printf("dynamic http: 0.0.0.0:%d", cfg.Dynamic.HTTPPort)
+	log.Printf("dynamic socks5: 0.0.0.0:%d", cfg.Dynamic.Socks5Port)
+	for _, port := range cfg.Fixed.HTTPPorts {
+		log.Printf("fixed http: 0.0.0.0:%d -> %s", port, state.FixedPorts[fmt.Sprint(port)])
+	}
+	for _, port := range cfg.Fixed.Socks5Ports {
+		log.Printf("fixed socks5: 0.0.0.0:%d -> %s", port, state.FixedPorts[fmt.Sprint(port)])
+	}
 
+	wg.Wait()
 }
 
-func generateRandomIPv6(cidr string) (string, error) {
-	// 解析CIDR
-	_, ipv6Net, err := net.ParseCIDR(cidr)
+func loadRuntimeConfig(configPath string, explicitConfig bool, legacyCIDR string, legacyPort int, explicitCIDR bool, explicitPort bool) (*Config, error) {
+	if _, err := os.Stat(configPath); err == nil {
+		cfg, err := LoadConfig(configPath)
+		if err != nil {
+			return nil, err
+		}
+		if explicitCIDR {
+			cfg.CIDR = legacyCIDR
+		}
+		if explicitPort {
+			cfg.Dynamic.HTTPPort = legacyPort
+			cfg.Dynamic.Socks5Port = legacyPort + 1
+		}
+		cfg.ConfigSource = configPath
+		return cfg, nil
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("stat config file %s: %w", configPath, err)
+	}
+
+	if explicitConfig {
+		return nil, fmt.Errorf("config file %s does not exist", configPath)
+	}
+	if legacyCIDR == "" {
+		return nil, fmt.Errorf("config file %s does not exist and --cidr is empty", configPath)
+	}
+
+	cfg := DefaultConfig()
+	cfg.CIDR = legacyCIDR
+	cfg.Dynamic.HTTPPort = legacyPort
+	cfg.Dynamic.Socks5Port = legacyPort + 1
+	cfg.ConfigSource = "command-line"
+	return cfg, nil
+}
+
+func startHTTPServer(wg *sync.WaitGroup, port int, selector OutboundSelector, auth *ProxyAuth, verbose bool, name string) {
+	server := &http.Server{
+		Addr:    fmt.Sprintf("0.0.0.0:%d", port),
+		Handler: newHTTPProxy(selector, auth, verbose, name),
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("%s server err: %v", name, err)
+		}
+	}()
+}
+
+func startSocks5Server(wg *sync.WaitGroup, port int, selector OutboundSelector, auth *ProxyAuth, name string) {
+	server, err := newSocks5Proxy(selector, auth, name)
 	if err != nil {
-		return "", err
+		log.Fatalf("%s init err: %v", name, err)
 	}
 
-	// 获取网络部分和掩码长度
-	maskSize, _ := ipv6Net.Mask.Size()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.ListenAndServe("tcp", fmt.Sprintf("0.0.0.0:%d", port)); err != nil {
+			log.Fatalf("%s server err: %v", name, err)
+		}
+	}()
+}
 
-	// 计算随机部分的长度
-	randomPartLength := 128 - maskSize
-
-	// 生成随机部分
-	randomPart := make([]byte, randomPartLength/8)
-	_, err = rand.Read(randomPart)
+func validateIPv6CIDR(cidr string) error {
+	ip, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
-		return "", err
+		return err
 	}
-
-	// 获取网络部分
-	networkPart := ipv6Net.IP.To16()
-
-	// 合并网络部分和随机部分
-	for i := 0; i < len(randomPart); i++ {
-		networkPart[16-len(randomPart)+i] = randomPart[i]
+	if ip.To4() != nil || ip.To16() == nil {
+		return fmt.Errorf("%s is not an ipv6 cidr", cidr)
 	}
-
-	return networkPart.String(), nil
+	ones, bits := ipNet.Mask.Size()
+	if bits != 128 || ones < 0 {
+		return fmt.Errorf("%s is not an ipv6 cidr", cidr)
+	}
+	return nil
 }
