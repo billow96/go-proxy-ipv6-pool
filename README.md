@@ -67,7 +67,7 @@ fixed:
 
 ## 启动
 
-使用默认配置文件 `config.yaml`：
+开发调试时可以直接使用源码启动。使用默认配置文件 `config.yaml`：
 
 ```bash
 go run .
@@ -79,7 +79,65 @@ go run .
 go run . --config ./config.yaml
 ```
 
-如果当前目录没有 `config.yaml`，也可以继续使用旧版方式启动动态端口：
+## 使用二进制程序
+
+如果你拿到的是已经编译好的二进制文件，例如：
+
+```text
+go-proxy-ipv6-pool-linux-amd64
+```
+
+先给它添加执行权限：
+
+```bash
+chmod +x go-proxy-ipv6-pool-linux-amd64
+```
+
+准备配置文件：
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+然后编辑 `config.yaml`，至少把 `cidr` 改成服务器真实可用的 IPv6 CIDR。
+
+使用默认配置文件启动：
+
+```bash
+./go-proxy-ipv6-pool-linux-amd64
+```
+
+指定配置文件启动：
+
+```bash
+./go-proxy-ipv6-pool-linux-amd64 --config ./config.yaml
+```
+
+也可以继续使用兼容旧版的命令行参数，只启动动态 HTTP/SOCKS5 代理：
+
+```bash
+./go-proxy-ipv6-pool-linux-amd64 --port 52122 --cidr "2001:399:8205:ae00::/64"
+```
+
+如果使用 GitHub Release 下载的文件，常见文件名为：
+
+```text
+go-proxy-ipv6-pool-linux-amd64
+go-proxy-ipv6-pool-linux-arm64
+```
+
+其中：
+
+- `linux-amd64`：用于普通 x86_64 Linux 服务器。
+- `linux-arm64`：用于 ARM64 Linux 服务器。
+
+Release 中的 `.sha256` 文件用于校验二进制是否完整，例如：
+
+```bash
+sha256sum -c go-proxy-ipv6-pool-linux-amd64.sha256
+```
+
+源码启动也可以继续使用旧版参数，只启动动态 HTTP/SOCKS5 代理：
 
 ```bash
 go run . --port 52122 --cidr "2001:399:8205:ae00::/64"
@@ -109,20 +167,20 @@ dynamic:
 HTTP 代理：
 
 ```bash
-curl -x http://proxy_user:proxy_password@服务器IP:52122 http://6.ipw.cn/
+curl -x http://proxy_user:proxy_password@服务器IP:52122 http://ipv6.ip.sb/
 ```
 
 SOCKS5 代理：
 
 ```bash
-curl -x socks5://proxy_user:proxy_password@服务器IP:52123 http://6.ipw.cn/
+curl -x socks5://proxy_user:proxy_password@服务器IP:52123 http://ipv6.ip.sb/
 ```
 
 如果没有配置 `auth.username` 和 `auth.password`，则不需要账号密码：
 
 ```bash
-curl -x http://服务器IP:52122 http://6.ipw.cn/
-curl -x socks5://服务器IP:52123 http://6.ipw.cn/
+curl -x http://服务器IP:52122 http://ipv6.ip.sb/
+curl -x socks5://服务器IP:52123 http://ipv6.ip.sb/
 ```
 
 ## 使用固定 IPv6 端口
@@ -159,9 +217,9 @@ fixed:
 示例：
 
 ```bash
-curl -x http://proxy_user:proxy_password@服务器IP:52133 http://6.ipw.cn/
-curl -x http://proxy_user:proxy_password@服务器IP:52134 http://6.ipw.cn/
-curl -x socks5://proxy_user:proxy_password@服务器IP:52135 http://6.ipw.cn/
+curl -x http://proxy_user:proxy_password@服务器IP:52133 http://ipv6.ip.sb/
+curl -x http://proxy_user:proxy_password@服务器IP:52134 http://ipv6.ip.sb/
+curl -x socks5://proxy_user:proxy_password@服务器IP:52135 http://ipv6.ip.sb/
 ```
 
 只要不删除或修改 `state.json`，固定端口对应的 IPv6 就会保持不变。
