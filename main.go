@@ -14,11 +14,18 @@ func main() {
 	var configPath string
 	var legacyCIDR string
 	var legacyPort int
+	var showVersion bool
 
 	flag.StringVar(&configPath, "config", "config.yaml", "config file path")
 	flag.StringVar(&legacyCIDR, "cidr", "", "ipv6 cidr, kept for compatibility when config file is absent")
 	flag.IntVar(&legacyPort, "port", 52122, "dynamic http port, kept for compatibility when config file is absent")
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.Parse()
+
+	if showVersion {
+		fmt.Println(versionString())
+		return
+	}
 
 	explicitConfig := false
 	explicitCIDR := false
@@ -77,6 +84,7 @@ func main() {
 	}
 
 	log.Println("server running ...")
+	log.Printf("build: %s", versionString())
 	log.Printf("config: %s", cfg.ConfigSource)
 	log.Printf("state: %s", cfg.StateFile)
 	log.Printf("ipv6 cidr: [%s]", cfg.CIDR)

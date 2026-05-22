@@ -113,6 +113,12 @@ cp config.example.yaml config.yaml
 ./go-proxy-ipv6-pool-linux-amd64 --config ./config.yaml
 ```
 
+查看二进制版本信息：
+
+```bash
+./go-proxy-ipv6-pool-linux-amd64 --version
+```
+
 也可以继续使用兼容旧版的命令行参数，只启动动态 HTTP/SOCKS5 代理：
 
 ```bash
