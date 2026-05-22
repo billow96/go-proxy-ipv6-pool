@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net"
+	"strings"
 )
 
 type OutboundSelector func() (string, error)
@@ -27,14 +28,21 @@ func dialWithOutbound(ctx context.Context, network, addr string, selector Outbou
 		return nil, "", err
 	}
 
-	localAddr, err := net.ResolveTCPAddr("tcp", "["+outboundIP+"]:0")
+	localAddr, err := net.ResolveTCPAddr("tcp6", "["+outboundIP+"]:0")
 	if err != nil {
 		return nil, outboundIP, err
 	}
 
 	dialer := net.Dialer{LocalAddr: localAddr}
-	conn, err := dialer.DialContext(ctx, network, addr)
+	conn, err := dialer.DialContext(ctx, forceTCP6Network(network), addr)
 	return conn, outboundIP, err
+}
+
+func forceTCP6Network(network string) string {
+	if strings.HasPrefix(network, "tcp") {
+		return "tcp6"
+	}
+	return network
 }
 
 func generateRandomIPv6(cidr string) (string, error) {
