@@ -14,26 +14,26 @@ func newHTTPProxy(selector OutboundSelector, auth *ProxyAuth, verbose bool, name
 	proxy.Verbose = verbose
 	proxy.Tr = &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			conn, outboundIP, err := dialWithOutbound(ctx, network, addr, selector)
+			conn, outboundIP, finalNetwork, finalAddr, err := dialWithOutbound(ctx, network, addr, selector)
 			if err != nil {
-				log.Printf("[%s] dial %s via %s error: %v", name, addr, outboundIP, err)
+				log.Printf("[%s] dial network=%s addr=%s final_network=%s final_addr=%s via=%s error=%v", name, network, addr, finalNetwork, finalAddr, outboundIP, err)
 				return nil, err
 			}
 			if verbose {
-				log.Printf("[%s] %s via [%s]", name, addr, outboundIP)
+				log.Printf("[%s] dial network=%s addr=%s final_network=%s final_addr=%s via=%s", name, network, addr, finalNetwork, finalAddr, outboundIP)
 			}
 			return conn, nil
 		},
 		DisableKeepAlives: true,
 	}
 	proxy.ConnectDialWithReq = func(req *http.Request, network, addr string) (net.Conn, error) {
-		conn, outboundIP, err := dialWithOutbound(req.Context(), network, addr, selector)
+		conn, outboundIP, finalNetwork, finalAddr, err := dialWithOutbound(req.Context(), network, addr, selector)
 		if err != nil {
-			log.Printf("[%s] connect %s via %s error: %v", name, addr, outboundIP, err)
+			log.Printf("[%s] connect network=%s addr=%s final_network=%s final_addr=%s via=%s error=%v", name, network, addr, finalNetwork, finalAddr, outboundIP, err)
 			return nil, err
 		}
 		if verbose {
-			log.Printf("[%s] CONNECT %s via [%s]", name, addr, outboundIP)
+			log.Printf("[%s] CONNECT network=%s addr=%s final_network=%s final_addr=%s via=%s", name, network, addr, finalNetwork, finalAddr, outboundIP)
 		}
 		return conn, nil
 	}

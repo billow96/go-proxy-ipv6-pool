@@ -22,20 +22,26 @@ func newFixedOutboundSelector(ip string) OutboundSelector {
 	}
 }
 
-func dialWithOutbound(ctx context.Context, network, addr string, selector OutboundSelector) (net.Conn, string, error) {
+func dialWithOutbound(ctx context.Context, network, addr string, selector OutboundSelector) (net.Conn, string, string, string, error) {
 	outboundIP, err := selector()
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", "", err
 	}
 
 	localAddr, err := net.ResolveTCPAddr("tcp6", "["+outboundIP+"]:0")
 	if err != nil {
-		return nil, outboundIP, err
+		return nil, outboundIP, "", "", err
+	}
+
+	finalNetwork := forceTCP6Network(network)
+	finalAddr, err := forceTCP6Address(ctx, addr)
+	if err != nil {
+		return nil, outboundIP, finalNetwork, addr, err
 	}
 
 	dialer := net.Dialer{LocalAddr: localAddr}
-	conn, err := dialer.DialContext(ctx, forceTCP6Network(network), addr)
-	return conn, outboundIP, err
+	conn, err := dialer.DialContext(ctx, finalNetwork, finalAddr)
+	return conn, outboundIP, finalNetwork, finalAddr, err
 }
 
 func forceTCP6Network(network string) string {
@@ -43,6 +49,31 @@ func forceTCP6Network(network string) string {
 		return "tcp6"
 	}
 	return network
+}
+
+func forceTCP6Address(ctx context.Context, addr string) (string, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", err
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.To4() != nil {
+			return "", fmt.Errorf("ipv4 target blocked in ipv6-only dialer: %s", addr)
+		}
+		return net.JoinHostPort(ip.String(), port), nil
+	}
+
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip6", host)
+	if err != nil {
+		return "", err
+	}
+	for _, ip := range ips {
+		if ip.To4() == nil && ip.To16() != nil {
+			return net.JoinHostPort(ip.String(), port), nil
+		}
+	}
+	return "", fmt.Errorf("no ipv6 address found for %s", host)
 }
 
 func generateRandomIPv6(cidr string) (string, error) {
