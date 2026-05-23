@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     name: Build ${{ matrix.name }}
@@ -55,7 +58,15 @@ jobs:
           chmod +x "dist/${{ matrix.name }}"
 
       - name: Show version
+        if: matrix.goarch == 'amd64'
         run: "dist/${{ matrix.name }} --version"
+
+      - name: Verify cross-built version metadata
+        if: matrix.goarch != 'amd64'
+        run: |
+          file "dist/${{ matrix.name }}"
+          strings "dist/${{ matrix.name }}" | grep -F "${{ github.ref_name }}"
+          strings "dist/${{ matrix.name }}" | grep -F "${{ github.sha }}"
 
       - name: Generate checksum
         run: |
