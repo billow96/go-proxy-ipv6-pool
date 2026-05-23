@@ -3,24 +3,31 @@ package main
 import (
 	"crypto/subtle"
 	"encoding/base64"
+	"net"
 	"net/http"
 	"strings"
 )
 
 type ProxyAuth struct {
-	username string
-	password string
-	enabled  bool
+	username  string
+	password  string
+	enabled   bool
+	whitelist *IPWhitelist
 }
 
-func NewProxyAuth(cfg AuthConfig) (*ProxyAuth, error) {
+func NewProxyAuth(cfg AuthConfig, whitelistEntries []string) (*ProxyAuth, error) {
 	if err := validateAuthConfig(cfg); err != nil {
 		return nil, err
 	}
+	whitelist, err := ParseWhitelist(whitelistEntries)
+	if err != nil {
+		return nil, err
+	}
 	return &ProxyAuth{
-		username: cfg.Username,
-		password: cfg.Password,
-		enabled:  cfg.Username != "" || cfg.Password != "",
+		username:  cfg.Username,
+		password:  cfg.Password,
+		enabled:   cfg.Username != "" || cfg.Password != "",
+		whitelist: whitelist,
 	}, nil
 }
 
@@ -38,11 +45,32 @@ func (a *ProxyAuth) Valid(username, password string) bool {
 }
 
 func (a *ProxyAuth) AllowHTTPRequest(req *http.Request) bool {
+	if a.ClientWhitelisted(req.RemoteAddr) {
+		return true
+	}
 	if !a.Enabled() {
 		return true
 	}
 	username, password, ok := parseProxyBasicAuth(req.Header.Get("Proxy-Authorization"))
 	return ok && a.Valid(username, password)
+}
+
+func (a *ProxyAuth) ClientWhitelisted(remoteAddr string) bool {
+	if a == nil {
+		return false
+	}
+	return a.whitelist.Contains(clientIPFromRemoteAddr(remoteAddr))
+}
+
+func (a *ProxyAuth) ClientWhitelistedAddr(addr net.Addr) bool {
+	if addr == nil {
+		return false
+	}
+	return a.ClientWhitelisted(addr.String())
+}
+
+func (a *ProxyAuth) WhitelistEnabled() bool {
+	return a != nil && !a.whitelist.Empty()
 }
 
 func parseProxyBasicAuth(header string) (string, string, bool) {

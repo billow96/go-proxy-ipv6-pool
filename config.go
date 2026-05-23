@@ -13,6 +13,7 @@ type Config struct {
 	StateFile    string        `yaml:"state_file"`
 	Verbose      bool          `yaml:"verbose"`
 	Auth         AuthConfig    `yaml:"auth"`
+	Whitelist    []string      `yaml:"whitelist"`
 	Dynamic      DynamicConfig `yaml:"dynamic"`
 	Fixed        FixedConfig   `yaml:"fixed"`
 	ConfigSource string        `yaml:"-"`
@@ -77,6 +78,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid cidr: %w", err)
 	}
 	if err := validateAuthConfig(c.Auth); err != nil {
+		return err
+	}
+	if _, err := ParseWhitelist(c.Whitelist); err != nil {
 		return err
 	}
 

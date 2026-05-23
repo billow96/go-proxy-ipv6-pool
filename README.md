@@ -42,6 +42,12 @@ auth:
   username: "proxy_user"
   password: "proxy_password"
 
+whitelist:
+  - "127.0.0.1"
+  - "::1"
+  # - "192.168.1.0/24"
+  # - "2001:db8::/32"
+
 dynamic:
   http_port: 52122
   socks5_port: 52123
@@ -60,6 +66,7 @@ fixed:
 - `state_file`：固定端口 IPv6 映射的持久化文件，默认 `state.json`。
 - `verbose`：是否打印更详细的 HTTP 代理日志。
 - `auth.username` / `auth.password`：代理认证账号密码。两者都为空表示不启用认证；只配置其中一个会启动失败。
+- `whitelist`：认证白名单，支持单个 IP 和 CIDR。白名单内客户端在配置账号密码时也可以免密使用代理。
 - `dynamic.http_port`：动态 HTTP 代理端口。
 - `dynamic.socks5_port`：动态 SOCKS5 代理端口。
 - `fixed.http_ports`：固定 IPv6 的 HTTP 代理端口列表。
@@ -189,6 +196,49 @@ curl -x http://服务器IP:52122 http://ipv6.ip.sb/
 curl -x socks5://服务器IP:52123 http://ipv6.ip.sb/
 ```
 
+## 查询客户端 IP
+
+HTTP 代理端口同时提供一个很小的非代理查询接口，用来查看服务端看到的客户端 IP，方便加入白名单。
+
+查看纯文本 IP：
+
+```bash
+curl http://服务器IP:52122/ip
+```
+
+示例返回：
+
+```text
+1.2.3.4
+```
+
+查看更详细的 JSON：
+
+```bash
+curl http://服务器IP:52122/whoami
+```
+
+示例返回：
+
+```json
+{
+  "ip": "1.2.3.4",
+  "remote_addr": "1.2.3.4:54321"
+}
+```
+
+直接访问 HTTP 代理端口根路径会返回提示：
+
+```bash
+curl http://服务器IP:52122/
+```
+
+```text
+This is a proxy server. Use /ip to view your client IP.
+```
+
+`/ip` 和 `/whoami` 不要求账号密码，也不要求客户端已经在白名单内。它们只返回 TCP 连接的真实 `RemoteAddr`，不会信任客户端伪造的 `X-Forwarded-For`、`X-Real-IP` 等请求头。
+
 ## 使用固定 IPv6 端口
 
 假设配置：
@@ -239,11 +289,22 @@ curl -x socks5://proxy_user:proxy_password@服务器IP:52135 http://ipv6.ip.sb/
 
 当配置了 `auth.username` 和 `auth.password` 时：
 
-- HTTP 代理必须携带正确的 `Proxy-Authorization`。
-- SOCKS5 代理必须使用用户名密码认证。
+- 白名单内客户端可以不带账号密码直接使用 HTTP 和 SOCKS5 代理。
+- 非白名单客户端的 HTTP 代理请求必须携带正确的 `Proxy-Authorization`。
+- 非白名单客户端的 SOCKS5 代理请求必须使用用户名密码认证。
 - 动态端口和固定端口都会启用同一组账号密码。
 
-目前没有启用 IP 白名单免认证；所有非空认证配置都会对所有客户端生效。
+白名单支持单个 IP 和 CIDR：
+
+```yaml
+whitelist:
+  - "127.0.0.1"
+  - "::1"
+  - "192.168.1.0/24"
+  - "2001:db8::/32"
+```
+
+白名单判断只使用 TCP 连接的 `RemoteAddr`，不会信任客户端传入的 HTTP 头。
 
 ## 固定端口数量和资源占用
 

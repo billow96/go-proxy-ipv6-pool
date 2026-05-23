@@ -65,7 +65,7 @@ func main() {
 		}
 	}
 
-	auth, err := NewProxyAuth(cfg.Auth)
+	auth, err := NewProxyAuth(cfg.Auth, cfg.Whitelist)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -89,6 +89,7 @@ func main() {
 	log.Printf("state: %s", cfg.StateFile)
 	log.Printf("ipv6 cidr: [%s]", cfg.CIDR)
 	log.Printf("auth enabled: %v", auth.Enabled())
+	log.Printf("whitelist enabled: %v", auth.WhitelistEnabled())
 	log.Printf("dynamic http: 0.0.0.0:%d", cfg.Dynamic.HTTPPort)
 	log.Printf("dynamic socks5: 0.0.0.0:%d", cfg.Dynamic.Socks5Port)
 	for _, port := range cfg.Fixed.HTTPPorts {

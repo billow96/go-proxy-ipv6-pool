@@ -6,6 +6,12 @@ auth:
   username: "proxy_user"
   password: "proxy_password"
 
+whitelist:
+  - "127.0.0.1"
+  - "::1"
+  # - "192.168.1.0/24"
+  # - "2001:db8::/32"
+
 dynamic:
   http_port: 51122
   socks5_port: 51123

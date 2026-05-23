@@ -10,7 +10,36 @@ import (
 	xcontext "golang.org/x/net/context"
 )
 
-func newSocks5Proxy(selector OutboundSelector, auth *ProxyAuth, name string) (*socks5.Server, error) {
+type Socks5Proxy struct {
+	name           string
+	auth           *ProxyAuth
+	noAuthServer   *socks5.Server
+	userPassServer *socks5.Server
+}
+
+func newSocks5Proxy(selector OutboundSelector, auth *ProxyAuth, name string) (*Socks5Proxy, error) {
+	noAuthServer, err := socks5.New(newSocks5Config(selector, auth, true, name))
+	if err != nil {
+		return nil, err
+	}
+
+	var userPassServer *socks5.Server
+	if auth.Enabled() {
+		userPassServer, err = socks5.New(newSocks5Config(selector, auth, false, name))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &Socks5Proxy{
+		name:           name,
+		auth:           auth,
+		noAuthServer:   noAuthServer,
+		userPassServer: userPassServer,
+	}, nil
+}
+
+func newSocks5Config(selector OutboundSelector, auth *ProxyAuth, noAuth bool, name string) *socks5.Config {
 	conf := &socks5.Config{
 		Resolver: ipv6Resolver{name: name},
 		Rewriter: ipv6Rewriter{name: name},
@@ -25,13 +54,58 @@ func newSocks5Proxy(selector OutboundSelector, auth *ProxyAuth, name string) (*s
 		},
 	}
 
-	if auth.Enabled() {
-		conf.Credentials = socks5.StaticCredentials{
-			auth.username: auth.password,
+	if noAuth {
+		conf.AuthMethods = []socks5.Authenticator{&socks5.NoAuthAuthenticator{}}
+		if auth != nil && auth.Enabled() {
+			conf.AuthMethods = append(conf.AuthMethods, &socks5.UserPassAuthenticator{
+				Credentials: socks5.StaticCredentials{auth.username: auth.password},
+			})
+		}
+	} else if auth != nil && auth.Enabled() {
+		conf.AuthMethods = []socks5.Authenticator{
+			&socks5.UserPassAuthenticator{
+				Credentials: socks5.StaticCredentials{auth.username: auth.password},
+			},
 		}
 	}
 
-	return socks5.New(conf)
+	return conf
+}
+
+func (p *Socks5Proxy) ListenAndServe(network, addr string) error {
+	listener, err := net.Listen(network, addr)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return err
+		}
+		go p.serveConn(conn)
+	}
+}
+
+func (p *Socks5Proxy) serveConn(conn net.Conn) {
+	if !p.auth.Enabled() || p.auth.ClientWhitelistedAddr(conn.RemoteAddr()) {
+		if p.auth.Enabled() {
+			log.Printf("[%s] whitelist no-auth client=%s", p.name, conn.RemoteAddr())
+		}
+		if err := p.noAuthServer.ServeConn(conn); err != nil {
+			log.Printf("[%s] no-auth client=%s error=%v", p.name, conn.RemoteAddr(), err)
+		}
+		return
+	}
+
+	if p.userPassServer == nil {
+		_ = conn.Close()
+		return
+	}
+	if err := p.userPassServer.ServeConn(conn); err != nil {
+		log.Printf("[%s] user-pass client=%s error=%v", p.name, conn.RemoteAddr(), err)
+	}
 }
 
 type ipv6Resolver struct {

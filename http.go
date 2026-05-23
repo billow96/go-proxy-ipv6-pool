@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 func newHTTPProxy(selector OutboundSelector, auth *ProxyAuth, verbose bool, name string) http.Handler {
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = verbose
+	proxy.NonproxyHandler = http.HandlerFunc(handleNonProxyRequest)
 	proxy.Tr = &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			conn, outboundIP, finalNetwork, finalAddr, err := dialWithOutbound(ctx, network, addr, selector)
@@ -39,10 +41,44 @@ func newHTTPProxy(selector OutboundSelector, auth *ProxyAuth, verbose bool, name
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if isNonProxyRequest(req) {
+			proxy.ServeHTTP(w, req)
+			return
+		}
 		if !auth.AllowHTTPRequest(req) {
 			writeProxyAuthRequired(w)
 			return
 		}
 		proxy.ServeHTTP(w, req)
 	})
+}
+
+func isNonProxyRequest(req *http.Request) bool {
+	return req.Method != http.MethodConnect && !req.URL.IsAbs()
+}
+
+func handleNonProxyRequest(w http.ResponseWriter, req *http.Request) {
+	clientIP := clientIPFromRemoteAddr(req.RemoteAddr)
+	ipText := ""
+	if clientIP != nil {
+		ipText = clientIP.String()
+	}
+
+	switch req.URL.Path {
+	case "/ip":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(ipText + "\n"))
+	case "/whoami":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"ip":          ipText,
+			"remote_addr": req.RemoteAddr,
+		})
+	default:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("This is a proxy server. Use /ip to view your client IP.\n"))
+	}
 }
