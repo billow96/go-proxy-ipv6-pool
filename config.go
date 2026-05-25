@@ -9,14 +9,16 @@ import (
 )
 
 type Config struct {
-	CIDR         string        `yaml:"cidr"`
-	StateFile    string        `yaml:"state_file"`
-	Verbose      bool          `yaml:"verbose"`
-	Auth         AuthConfig    `yaml:"auth"`
-	Whitelist    []string      `yaml:"whitelist"`
-	Dynamic      DynamicConfig `yaml:"dynamic"`
-	Fixed        FixedConfig   `yaml:"fixed"`
-	ConfigSource string        `yaml:"-"`
+	CIDR          string        `yaml:"cidr"`
+	StateFile     string        `yaml:"state_file"`
+	Verbose       bool          `yaml:"verbose"`
+	Auth          AuthConfig    `yaml:"auth"`
+	Whitelist     []string      `yaml:"whitelist"`
+	Admin         AdminConfig   `yaml:"admin"`
+	Dynamic       DynamicConfig `yaml:"dynamic"`
+	Fixed         FixedConfig   `yaml:"fixed"`
+	ConfigSource  string        `yaml:"-"`
+	StateFilePath string        `yaml:"-"`
 }
 
 type AuthConfig struct {
@@ -27,6 +29,12 @@ type AuthConfig struct {
 type DynamicConfig struct {
 	HTTPPort   int `yaml:"http_port"`
 	Socks5Port int `yaml:"socks5_port"`
+}
+
+type AdminConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Listen  string `yaml:"listen"`
+	Token   string `yaml:"token"`
 }
 
 type FixedConfig struct {
@@ -44,6 +52,9 @@ func (f FixedConfig) AllPorts() []int {
 func DefaultConfig() *Config {
 	return &Config{
 		StateFile: "state.json",
+		Admin: AdminConfig{
+			Listen: "127.0.0.1:52120",
+		},
 		Dynamic: DynamicConfig{
 			HTTPPort:   52122,
 			Socks5Port: 52123,
@@ -64,10 +75,26 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.StateFile == "" {
 		cfg.StateFile = "state.json"
 	}
-	if !filepath.IsAbs(cfg.StateFile) {
-		cfg.StateFile = filepath.Join(filepath.Dir(path), cfg.StateFile)
+	cfg.StateFilePath = cfg.StateFile
+	if !filepath.IsAbs(cfg.StateFilePath) {
+		cfg.StateFilePath = filepath.Join(filepath.Dir(path), cfg.StateFilePath)
 	}
 	return cfg, nil
+}
+
+func SaveConfig(path string, cfg *Config) error {
+	if path == "" || path == "command-line" {
+		return fmt.Errorf("config file path is not available")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	return atomicWriteFile(path, data, 0600)
 }
 
 func (c *Config) Validate() error {
@@ -82,6 +109,14 @@ func (c *Config) Validate() error {
 	}
 	if _, err := ParseWhitelist(c.Whitelist); err != nil {
 		return err
+	}
+	if c.Admin.Enabled {
+		if c.Admin.Listen == "" {
+			return fmt.Errorf("admin.listen is empty")
+		}
+		if c.Admin.Token == "" {
+			return fmt.Errorf("admin.token is empty")
+		}
 	}
 
 	seen := make(map[int]string)

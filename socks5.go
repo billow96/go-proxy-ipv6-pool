@@ -77,6 +77,10 @@ func (p *Socks5Proxy) ListenAndServe(network, addr string) error {
 	if err != nil {
 		return err
 	}
+	return p.Serve(listener)
+}
+
+func (p *Socks5Proxy) Serve(listener net.Listener) error {
 	defer listener.Close()
 
 	for {

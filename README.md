@@ -48,6 +48,11 @@ whitelist:
   # - "192.168.1.0/24"
   # - "2001:db8::/32"
 
+admin:
+  enabled: false
+  listen: "127.0.0.1:52120"
+  token: "change-this-admin-token"
+
 dynamic:
   http_port: 52122
   socks5_port: 52123
@@ -67,10 +72,15 @@ fixed:
 - `verbose`：是否打印更详细的 HTTP 代理日志。
 - `auth.username` / `auth.password`：代理认证账号密码。两者都为空表示不启用认证；只配置其中一个会启动失败。
 - `whitelist`：认证白名单，支持单个 IP 和 CIDR。白名单内客户端在配置账号密码时也可以免密使用代理。
+- `admin.enabled`：是否启用管理 API。
+- `admin.listen`：管理 API 监听地址，建议默认只监听 `127.0.0.1`。
+- `admin.token`：管理 API Bearer token，启用管理 API 时必须配置。
 - `dynamic.http_port`：动态 HTTP 代理端口。
 - `dynamic.socks5_port`：动态 SOCKS5 代理端口。
 - `fixed.http_ports`：固定 IPv6 的 HTTP 代理端口列表。
 - `fixed.socks5_ports`：固定 IPv6 的 SOCKS5 代理端口列表。
+
+管理 API 的完整用法见 [API_DOCUMENTATION.md](API_DOCUMENTATION.md)。
 
 ## 启动
 

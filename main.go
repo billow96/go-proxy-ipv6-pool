@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"os"
-	"sync"
 )
 
 func main() {
@@ -50,56 +48,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fixedPorts := cfg.Fixed.AllPorts()
-	state := &State{FixedPorts: make(map[string]string)}
-	if len(fixedPorts) > 0 {
-		state, err = LoadState(cfg.StateFile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := state.EnsureFixedPortIPs(fixedPorts, cfg.CIDR); err != nil {
-			log.Fatal(err)
-		}
-		if err := state.Save(cfg.StateFile); err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	auth, err := NewProxyAuth(cfg.Auth, cfg.Whitelist)
+	app, err := NewApp(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	var wg sync.WaitGroup
-	startHTTPServer(&wg, cfg.Dynamic.HTTPPort, newRandomOutboundSelector(cfg.CIDR), auth, cfg.Verbose, "dynamic-http")
-	startSocks5Server(&wg, cfg.Dynamic.Socks5Port, newRandomOutboundSelector(cfg.CIDR), auth, "dynamic-socks5")
-
-	for _, port := range cfg.Fixed.HTTPPorts {
-		ip := state.FixedPorts[fmt.Sprint(port)]
-		startHTTPServer(&wg, port, newFixedOutboundSelector(ip), auth, cfg.Verbose, fmt.Sprintf("fixed-http-%d", port))
+	if err := app.Start(); err != nil {
+		log.Fatal(err)
 	}
-	for _, port := range cfg.Fixed.Socks5Ports {
-		ip := state.FixedPorts[fmt.Sprint(port)]
-		startSocks5Server(&wg, port, newFixedOutboundSelector(ip), auth, fmt.Sprintf("fixed-socks5-%d", port))
-	}
-
-	log.Println("server running ...")
-	log.Printf("build: %s", versionString())
-	log.Printf("config: %s", cfg.ConfigSource)
-	log.Printf("state: %s", cfg.StateFile)
-	log.Printf("ipv6 cidr: [%s]", cfg.CIDR)
-	log.Printf("auth enabled: %v", auth.Enabled())
-	log.Printf("whitelist enabled: %v", auth.WhitelistEnabled())
-	log.Printf("dynamic http: 0.0.0.0:%d", cfg.Dynamic.HTTPPort)
-	log.Printf("dynamic socks5: 0.0.0.0:%d", cfg.Dynamic.Socks5Port)
-	for _, port := range cfg.Fixed.HTTPPorts {
-		log.Printf("fixed http: 0.0.0.0:%d -> %s", port, state.FixedPorts[fmt.Sprint(port)])
-	}
-	for _, port := range cfg.Fixed.Socks5Ports {
-		log.Printf("fixed socks5: 0.0.0.0:%d -> %s", port, state.FixedPorts[fmt.Sprint(port)])
-	}
-
-	wg.Wait()
+	app.logStartup()
+	app.Wait()
 }
 
 func loadRuntimeConfig(configPath string, explicitConfig bool, legacyCIDR string, legacyPort int, explicitCIDR bool, explicitPort bool) (*Config, error) {
@@ -132,38 +89,9 @@ func loadRuntimeConfig(configPath string, explicitConfig bool, legacyCIDR string
 	cfg.CIDR = legacyCIDR
 	cfg.Dynamic.HTTPPort = legacyPort
 	cfg.Dynamic.Socks5Port = legacyPort + 1
+	cfg.StateFilePath = cfg.StateFile
 	cfg.ConfigSource = "command-line"
 	return cfg, nil
-}
-
-func startHTTPServer(wg *sync.WaitGroup, port int, selector OutboundSelector, auth *ProxyAuth, verbose bool, name string) {
-	server := &http.Server{
-		Addr:    fmt.Sprintf("0.0.0.0:%d", port),
-		Handler: newHTTPProxy(selector, auth, verbose, name),
-	}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("%s server err: %v", name, err)
-		}
-	}()
-}
-
-func startSocks5Server(wg *sync.WaitGroup, port int, selector OutboundSelector, auth *ProxyAuth, name string) {
-	server, err := newSocks5Proxy(selector, auth, name)
-	if err != nil {
-		log.Fatalf("%s init err: %v", name, err)
-	}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := server.ListenAndServe("tcp", fmt.Sprintf("0.0.0.0:%d", port)); err != nil {
-			log.Fatalf("%s server err: %v", name, err)
-		}
-	}()
 }
 
 func validateIPv6CIDR(cidr string) error {

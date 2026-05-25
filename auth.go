@@ -6,9 +6,11 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 type ProxyAuth struct {
+	mu        sync.RWMutex
 	username  string
 	password  string
 	enabled   bool
@@ -32,11 +34,21 @@ func NewProxyAuth(cfg AuthConfig, whitelistEntries []string) (*ProxyAuth, error)
 }
 
 func (a *ProxyAuth) Enabled() bool {
-	return a != nil && a.enabled
+	if a == nil {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.enabled
 }
 
 func (a *ProxyAuth) Valid(username, password string) bool {
-	if !a.Enabled() {
+	if a == nil {
+		return true
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if !a.enabled {
 		return true
 	}
 	userOK := subtle.ConstantTimeCompare([]byte(username), []byte(a.username)) == 1
@@ -59,6 +71,8 @@ func (a *ProxyAuth) ClientWhitelisted(remoteAddr string) bool {
 	if a == nil {
 		return false
 	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return a.whitelist.Contains(clientIPFromRemoteAddr(remoteAddr))
 }
 
@@ -70,7 +84,21 @@ func (a *ProxyAuth) ClientWhitelistedAddr(addr net.Addr) bool {
 }
 
 func (a *ProxyAuth) WhitelistEnabled() bool {
-	return a != nil && !a.whitelist.Empty()
+	if a == nil {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return !a.whitelist.Empty()
+}
+
+func (a *ProxyAuth) SetWhitelist(whitelist *IPWhitelist) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.whitelist = whitelist
 }
 
 func parseProxyBasicAuth(header string) (string, string, bool) {

@@ -42,7 +42,7 @@ func (s *State) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0600); err != nil {
+	if err := atomicWriteFile(path, append(data, '\n'), 0600); err != nil {
 		return fmt.Errorf("write state file %s: %w", path, err)
 	}
 	return nil
